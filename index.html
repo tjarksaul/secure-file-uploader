@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>File upload</title>
+</head>
+<body>
+<section id="wrapper">
+    <header>
+      <h1>File upload</h1>
+    </header>
+
+<style>
+#holder { border: 10px dashed #ccc; width: calc(100% - 30px); min-height: 300px; margin: 20px auto;}
+#holder.hover { border: 10px dashed #0c0; }
+#holder img { display: block; margin: 10px auto; }
+#holder p { margin: 10px; font-size: 14px; }
+progress { width: 100%; }
+progress:after { content: '%'; }
+.fail { background: #c00; padding: 2px; color: #fff; }
+.hidden { display: none !important;}
+#loginOverlay { display: none; position: fixed; top: 0px; left: 0px; width: 100%; height: 100%; background: white; vertical-align: middle; }
+#loginForm { text-align: center; }
+.errorMessage { display: none; font-weight: bold; color: red; border: 1px solid red;}
+</style>
+<article>
+<div id="loginOverlay">
+<form method="post" accept-charset="utf-8" action="tools/login.php?login" id="loginForm">
+<fieldset>
+<legend>Login</legend>
+<p class="errorMessage" id="loginMessage"></p>
+<input type="password" name="password" placeholder="Password" id="pwdInput" autofocus /><br />
+<input type="submit" />
+</fieldset>
+</form>
+</div>
+  <div id="holder">
+  </div> 
+  <p id="upload" class="hidden"><label>Drag & drop not supported, but you can still upload via this input field:<br><input type="file"></label></p>
+  <p id="filereader">File API & FileReader API not supported</p>
+  <p id="formdata">XHR2's FormData is not supported</p>
+  <p id="progress">XHR2's upload progress isn't supported</p>
+  <p>Upload progress: <progress id="uploadprogress" min="0" max="100" value="0">0</progress></p>
+  <p id="uploadMessage" class="errorMessage"></p>
+</article>
+<script>
+var holder = document.getElementById('holder'),
+    tests = {
+      filereader: typeof FileReader != 'undefined',
+      dnd: 'draggable' in document.createElement('span'),
+      formdata: !!window.FormData,
+      progress: "upload" in new XMLHttpRequest
+    }, 
+    support = {
+      filereader: document.getElementById('filereader'),
+      formdata: document.getElementById('formdata'),
+      progress: document.getElementById('progress')
+    },
+    acceptedTypes = {
+      'image/png': true,
+      'image/jpeg': true,
+      'image/gif': true
+    },
+    progress = document.getElementById('uploadprogress'),
+    fileupload = document.getElementById('upload');
+
+"filereader formdata progress".split(' ').forEach(function (api) {
+  if (tests[api] === false) {
+    support[api].className = 'fail';
+  } else {
+    // FFS. I could have done el.hidden = true, but IE doesn't support
+    // hidden, so I tried to create a polyfill that would extend the
+    // Element.prototype, but then IE10 doesn't even give me access
+    // to the Element object. Brilliant.
+    support[api].className = 'hidden';
+  }
+});
+
+xhr = new XMLHttpRequest();
+if (xhr) {
+    xhr.open('GET', 'tools/login.php?check', true);
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState == 4) {
+            json = JSON.parse(xhr.responseText);
+            if (!json.login) {
+                showLogin();
+            }
+        }
+    };
+    xhr.send(null);
+}
+
+var loginForm = document.getElementById('loginForm');
+loginForm.onsubmit = submitLoginForm;
+
+function showLogin () {
+    var loginOverlay = document.getElementById('loginOverlay');
+    loginOverlay.style.display = 'table-cell';
+    document.getElementById('pwdInput').focus();
+}
+
+function submitLoginForm () {
+    var xhr = new XMLHttpRequest();
+    if (xhr) {
+        xhr.open('POST', 'tools/login.php?login', true);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState == 4) {
+                json = JSON.parse(xhr.responseText);
+                if (json.code == 0) {
+                    loginOverlay.style.display = 'none';
+                } else {
+                    var loginMessage = document.getElementById('loginMessage');
+                    loginMessage.innerHTML = json.message;
+                    loginMessage.style.display = 'block';
+                }
+            }
+        };
+        var formData = new FormData(loginForm);
+        xhr.send(formData);
+        return false;
+    }
+}
+
+function previewfile(file) {
+  if (tests.filereader === true && acceptedTypes[file.type] === true) {
+    var reader = new FileReader();
+    reader.onload = function (event) {
+      var image = new Image();
+      image.src = event.target.result;
+      image.width = 250; // a fake resize
+      holder.appendChild(image);
+    };
+
+    reader.readAsDataURL(file);
+  }  else {
+    holder.innerHTML += '<p>Uploaded ' + file.name + ' ' + (file.size ? (file.size/1000|0) + 'K' : '');
+    console.log(file);
+  }
+}
+
+function readfiles(files) {
+    // debugger;
+    var formData = tests.formdata ? new FormData() : null;
+    for (var i = 0; i < files.length; i++) {
+      if (tests.formdata) formData.append('file', files[i]);
+      previewfile(files[i]);
+    }
+
+    // now post a new XHR request
+    if (tests.formdata) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', 'tools/ul.php');
+      xhr.onload = function() {
+        progress.value = progress.innerHTML = 100;
+      };
+
+      if (tests.progress) {
+        xhr.upload.onprogress = function (event) {
+          if (event.lengthComputable) {
+            var complete = (event.loaded / event.total * 100 | 0);
+            progress.value = progress.innerHTML = complete;
+          }
+        }
+      }
+
+      xhr.onreadystatechange = function () {
+            if (xhr.readyState == 4) {
+                json = JSON.parse(xhr.responseText);
+                var uploadMessage = document.getElementById('uploadMessage');
+                if (json.code == 0) {
+                    uploadMessage.innerHTML = '<input onfocus="this.select()" onclick="this.select()" type="text" value="' + json.url + '" />';
+                } else {
+                    uploadMessage.innerHTML = json.message;
+                }
+                uploadMessage.style.display = 'block';
+            }
+        }
+
+      xhr.send(formData);
+    }
+}
+
+if (tests.dnd) { 
+  holder.ondragover = function () { this.className = 'hover'; return false; };
+  holder.ondragend = function () { this.className = ''; return false; };
+  holder.ondrop = function (e) {
+    this.className = '';
+    e.preventDefault();
+    readfiles(e.dataTransfer.files);
+  }
+} else {
+  fileupload.className = 'hidden';
+  fileupload.querySelector('input').onchange = function () {
+    readfiles(this.files);
+  };
+}
+
+</script>
+</section>
+</body>
+</html>
